@@ -8,7 +8,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 import google.generativeai as genai
 
 # --- KONFIGURASI ---
-GEMINI_API_KEY = "AIzaSyBtoq-CLs6GMZYzMFS6tYrBrefXRJYG5Bo"
+GEMINI_API_KEY = "AIzaSyABUJVcebDcgIajP6o25OHXlGcYxZGBHHE"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # SOLUSI AMPUH: Mencari model yang tersedia secara otomatis agar tidak 404
@@ -121,4 +121,5 @@ if 'draf_final' in st.session_state:
             )
         except Exception as e:
             st.error(f"Gagal cetak: {str(e)}")
+
 
