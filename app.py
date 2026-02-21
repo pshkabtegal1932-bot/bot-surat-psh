@@ -11,7 +11,7 @@ import google.generativeai as genai
 # Ganti dengan API Key kamu yang baru jika masih kena limit 429
 GEMINI_API_KEY = "AIzaSyBtoq-CLs6GMZYzMFS6tYrBrefXRJYG5Bo"
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-flash")
 st.set_page_config(page_title="PSH Tegal Dashboard", page_icon="📝")
 
 # --- FUNGSI PENDUKUNG ---
@@ -111,3 +111,4 @@ if 'draf_final' in st.session_state:
         except Exception as e:
 
             st.error(f"Gagal cetak: {str(e)}")
+
