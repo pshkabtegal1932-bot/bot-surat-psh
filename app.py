@@ -7,22 +7,32 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 import google.generativeai as genai
 
-# --- KONFIGURASI ---
-GEMINI_API_KEY = "AIzaSyABUJVcebDcgIajP6o25OHXlGcYxZGBHHE"
+# --- KONFIGURASI AMAN ---
+# Mengambil API Key dari Secrets Streamlit (Anti-Leak)
+try:
+    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+except Exception:
+    st.error("Waduh, API Key belum disetting di Secrets Streamlit!")
+    st.stop()
+
 genai.configure(api_key=GEMINI_API_KEY)
 
 # SOLUSI AMPUH: Mencari model yang tersedia secara otomatis agar tidak 404
 @st.cache_resource
 def load_ai_model():
-    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    # Prioritas 1: 1.5 Flash
-    if 'models/gemini-1.5-flash' in available_models:
-        return genai.GenerativeModel('gemini-1.5-flash')
-    # Prioritas 2: 1.0 Pro
-    elif 'models/gemini-pro' in available_models:
-        return genai.GenerativeModel('gemini-pro')
-    # Terakhir: Ambil apa saja yang ada
-    return genai.GenerativeModel(available_models[0].replace('models/', ''))
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        # Prioritas 1: 1.5 Flash
+        if 'models/gemini-1.5-flash' in available_models:
+            return genai.GenerativeModel('gemini-1.5-flash')
+        # Prioritas 2: 1.0 Pro
+        elif 'models/gemini-pro' in available_models:
+            return genai.GenerativeModel('gemini-pro')
+        # Terakhir: Ambil apa saja yang ada
+        return genai.GenerativeModel(available_models[0].replace('models/', ''))
+    except Exception as e:
+        st.error(f"Gagal memuat model AI: {e}")
+        st.stop()
 
 model = load_ai_model()
 
@@ -56,7 +66,7 @@ def format_word_pro(doc, tag, content):
 
 # --- UI DASHBOARD ---
 st.title("🛡️ Generator Surat PSH Tegal")
-st.info("Status: Siap digunakan. Sistem otomatis mencari model AI terbaik.")
+st.info("Status: Siap digunakan. Koneksi aman via Streamlit Secrets.")
 
 with st.form("form_surat"):
     col1, col2 = st.columns(2)
@@ -121,5 +131,3 @@ if 'draf_final' in st.session_state:
             )
         except Exception as e:
             st.error(f"Gagal cetak: {str(e)}")
-
-
