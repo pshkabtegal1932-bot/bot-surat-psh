@@ -9,43 +9,32 @@ import google.generativeai as genai
 
 # --- KONFIGURASI AMAN ---
 try:
-    # Mengambil API Key dari Secrets Streamlit
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    genai.configure(api_key=GEMINI_API_KEY)
 except Exception:
     st.error("Waduh, API Key belum disetting di Secrets Streamlit!")
     st.stop()
 
-genai.configure(api_key=GEMINI_API_KEY)
-
 @st.cache_resource
 def load_ai_model():
     """
-    Fungsi 'Sapu Jagat' untuk menghindari error 404.
-    Mencoba berbagai variasi nama model yang didukung Google.
+    Sistem deteksi model otomatis agar tidak kena error 404.
     """
-    errors = []
-    # Daftar variasi nama yang sering diminta API v1beta atau v1
-    model_names = ["gemini-1.5-flash", "models/gemini-1.5-flash", "gemini-pro", "models/gemini-pro"]
-    
-    for name in model_names:
-        try:
-            m = genai.GenerativeModel(name)
-            # Tes panggil ringan untuk pastikan model memang ada
-            return m
-        except Exception as e:
-            errors.append(f"{name}: {str(e)}")
-            continue
-            
-    # Jika semua manual gagal, ambil otomatis dari daftar model yang tersedia di API Key tersebut
     try:
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                return genai.GenerativeModel(m.name)
-    except:
-        pass
+        # Mencari daftar model yang memang aktif di API Key kamu
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         
-    st.error(f"Gagal total memanggil AI. Error terakhir: {errors[-1]}")
-    st.stop()
+        # Cek satu per satu mana yang ada
+        if 'models/gemini-1.5-flash' in available_models:
+            return genai.GenerativeModel('gemini-1.5-flash')
+        elif 'models/gemini-pro' in available_models:
+            return genai.GenerativeModel('gemini-pro')
+        else:
+            # Jika tidak ada yang cocok, ambil apa saja yang tersedia pertama kali
+            return genai.GenerativeModel(available_models[0])
+    except Exception as e:
+        st.error(f"Gagal koneksi ke AI: {str(e)}. Pastikan API Key benar.")
+        st.stop()
 
 # Inisialisasi Model
 model = load_ai_model()
@@ -61,27 +50,29 @@ def get_tanggal_indo():
 
 def format_word_pro(doc, tag, content):
     """
-    Merapikan teks: Justify, Tabulasi lurus, dan Anti-Capslock.
+    Formatting rapi: Titik dua lurus, Times New Roman, Justify.
     """
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
             paragraph.text = paragraph.text.replace(tag, "")
             paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             
-            # Setting Tabulasi lurus di 1.5 inci
+            # Setting Tabulasi di 1.5 inci
             tab_stops = paragraph.paragraph_format.tab_stops
             tab_stops.add_tab_stop(Inches(1.5), WD_TAB_ALIGNMENT.LEFT)
             
             lines = content.split('\n')
             for i, line in enumerate(lines):
-                if tag in line: continue 
+                # Bersihkan sisa-sisa karakter markdown AI
+                clean_line = re.sub(r'[*#_]', '', line).strip()
+                if not clean_line or tag in clean_line: continue 
                 
-                if ":" in line:
-                    label, detail = line.split(":", 1)
-                    # title() bikin 'WAKTU' jadi 'Waktu' (Anti-Capslock)
+                if ":" in clean_line:
+                    label, detail = clean_line.split(":", 1)
+                    # title() untuk cegah CAPSLOCK berlebih
                     run = paragraph.add_run(f"{label.strip().title()}\t: {detail.strip()}")
                 else:
-                    run = paragraph.add_run(line)
+                    run = paragraph.add_run(clean_line)
                 
                 run.font.name = 'Times New Roman'
                 run.font.size = Pt(11)
@@ -90,7 +81,7 @@ def format_word_pro(doc, tag, content):
 
 # --- UI DASHBOARD ---
 st.title("🛡️ Generator Surat PSH Tegal")
-st.info("Status: Online. Format otomatis Times New Roman 11pt.")
+st.info("Status: Online. AI akan mendeteksi model terbaik secara otomatis.")
 
 with st.container():
     col1, col2 = st.columns(2)
@@ -106,23 +97,23 @@ with st.container():
         if not agenda_input:
             st.error("Isi dulu detail agendanya, Bro!")
         else:
-            with st.spinner("AI sedang menyusun draf rapi..."):
+            with st.spinner("AI sedang berpikir..."):
                 try:
-                    prompt = (f"Buat isi surat resmi PSH Tegal dari: {agenda_input}. "
-                              "Gunakan bahasa formal Indonesia. Jangan pakai CAPSLOCK semua. "
-                              "Format: LABEL : ISI. Tanpa salam pembuka, langsung inti. "
-                              "Jangan tulis lagi nomor/hal di dalam isi.")
+                    prompt = (f"Buat isi surat resmi PSH Tegal berdasarkan: {agenda_input}. "
+                              "Gunakan Bahasa Indonesia formal. Jangan gunakan huruf kapital semua. "
+                              "Format: NAMA ATRIBUT : ISI. Tanpa salam pembuka/penutup, "
+                              "langsung rincian intinya saja. Jangan tulis lagi nomor surat.")
                     
                     response = model.generate_content(prompt)
-                    draf_hasil = re.sub(r'[*#_]', '', response.text).strip()
-                    st.session_state['draf_final'] = draf_hasil
+                    st.session_state['draf_final'] = response.text.strip()
+                    st.success("Draf berhasil disusun!")
                 except Exception as e:
                     st.error(f"Error AI: {str(e)}")
 
 # --- AREA EDIT & DOWNLOAD ---
 if 'draf_final' in st.session_state:
     st.subheader("📝 Edit & Download")
-    isi_edit = st.text_area("Edit manual jika perlu sebelum dicetak:", 
+    isi_edit = st.text_area("Edit manual hasil AI di sini:", 
                             value=st.session_state['draf_final'], height=300)
     st.session_state['draf_final'] = isi_edit
 
@@ -149,9 +140,9 @@ if 'draf_final' in st.session_state:
             output = io.BytesIO()
             doc.save(output)
             st.session_state['word_file'] = output.getvalue()
-            st.success("File Word siap di-download!")
+            st.success("File Word sudah jadi!")
         except Exception as e:
-            st.error(f"Gagal memproses Word: {e}")
+            st.error(f"Gagal cetak Word: {e}")
 
     if 'word_file' in st.session_state:
         st.download_button(
@@ -160,9 +151,9 @@ if 'draf_final' in st.session_state:
             file_name=f"Surat_PSH_{nomor.replace('/', '-')}.docx",
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-        st.warning("Tips: Setelah buka di Word, pilih 'Save as PDF' di HP/PC kamu.")
+        st.warning("Tips: Buka file Word lalu 'Save as PDF' untuk hasil cetak terbaik.")
 
-    if st.button("🔄 Reset / Buat Ulang"):
+    if st.button("🔄 Reset"):
         for key in ['draf_final', 'word_file']:
             if key in st.session_state: del st.session_state[key]
         st.rerun()
