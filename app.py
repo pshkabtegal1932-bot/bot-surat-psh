@@ -6,16 +6,23 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 
-# --- KONEKSI AI (KUNCI MODEL BIAR GAK ERROR) ---
+# --- KONEKSI AI (SISTEM DETEKSI MODEL OTOMATIS) ---
 try:
     import google.generativeai as genai
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
     def panggil_ai_pintar(prompt):
-        # Pakai models/ prefix biar gak NotFound
+        # Cari model yang beneran ada & dukung generateContent
+        try:
+            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            # Prioritaskan gemini-1.5-flash kalau ada, kalau gak ada ambil yang pertama
+            model_name = "models/gemini-1.5-flash" if "models/gemini-1.5-flash" in available_models else available_models[0]
+        except:
+            model_name = "models/gemini-1.5-flash" # Fallback terakhir
+
         for i in range(3):
             try:
-                model = genai.GenerativeModel("models/gemini-1.5-flash")
+                model = genai.GenerativeModel(model_name)
                 response = model.generate_content(prompt)
                 return response.text
             except Exception as e:
@@ -30,7 +37,7 @@ except:
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI PENGISI KONTEN (KUNCI: RAPAT, JUSTIFY, & INDENTASI) ---
+# --- FUNGSI RAKIT ISI (TETAP KETAT & RAPI) ---
 def rakit_isi_surat(doc, tag, text, is_agenda=False):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
@@ -41,22 +48,17 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 if not raw_line: continue
                 
                 new_p = paragraph.insert_paragraph_before()
-                
-                # 1. RATA KANAN KIRI (JUSTIFY)
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                
-                # 2. JARAK PERLINE KETAT (SINGLE SPACING)
                 new_p.paragraph_format.line_spacing = 1.0
                 new_p.paragraph_format.space_after = Pt(0)
                 new_p.paragraph_format.space_before = Pt(0)
                 
-                # 3. FITUR *** UNTUK AWAL PARAGRAF MENJOROK
+                # Fitur *** untuk awal paragraf menjorok
                 clean_text = re.sub(r'[*#_]', '', raw_line).strip()
                 if raw_line.startswith("***"):
                     new_p.paragraph_format.first_line_indent = Inches(0.5)
                 
                 if is_agenda and ":" in clean_text:
-                    # 4. POIN : HARUS SAMA SEJAJAR
                     label, detail = clean_text.split(":", 1)
                     new_p.paragraph_format.left_indent = Inches(1.0)
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.5), WD_TAB_ALIGNMENT.LEFT)
@@ -64,7 +66,6 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 else:
                     run = new_p.add_run(clean_text)
                 
-                # 5. TIMES NEW ROMAN 11pt
                 run.font.name = 'Times New Roman'
                 run.font.size = Pt(11)
 
@@ -93,7 +94,6 @@ if submit:
 
 if 'draf_psh' in st.session_state:
     st.subheader("📝 Review & Edit Draf")
-    # KUNCI EDIT (Anti Bocor)
     draf_final = st.text_area("Edit manual (Gunakan *** untuk paragraf menjorok):", 
                               value=st.session_state['draf_psh'], height=300, key="editor_surat")
     st.session_state['draf_psh'] = draf_final
@@ -103,7 +103,6 @@ if 'draf_psh' in st.session_state:
             doc = Document("template_psh.docx")
             parts = draf_final.split("---")
             
-            # Update Header (Fix Tanggal Gak Double)
             h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
@@ -119,12 +118,10 @@ if 'draf_psh' in st.session_state:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(11)
 
-            # Isi Konten ke Tag {{pembuka}} dan {{agenda}}
             rakit_isi_surat(doc, "{{pembuka}}", parts[0].strip())
             if len(parts) > 1:
                 rakit_isi_surat(doc, "{{agenda}}", parts[1].strip(), is_agenda=True)
 
-            # Hapus tag sisa
             for p in doc.paragraphs:
                 if "{{pembuka}}" in p.text or "{{agenda}}" in p.text: p.text = ""
 
