@@ -5,7 +5,7 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 
-# --- KONEKSI AI (DENGAN HANDLER MODEL) ---
+# --- KONEKSI AI ---
 try:
     import google.generativeai as genai
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -20,7 +20,7 @@ except:
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI PENGISI KONTEN (LINE KETAT & FITUR INDENTASI) ---
+# --- FUNGSI RAKIT ISI (RAPAT, JUSTIFY, & FITUR INDENTASI) ---
 def rakit_isi_surat(doc, tag, text, is_agenda=False):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
@@ -35,7 +35,7 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 # 1. DEFAULT RATA KANAN KIRI (JUSTIFY)
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 
-                # 2. PERKETAT JARAK (SINGLE SPACING & NO SPACE AFTER)
+                # 2. PERKETAT JARAK (SINGLE SPACING & NO SPACE)
                 new_p.paragraph_format.line_spacing = 1.0
                 new_p.paragraph_format.space_after = Pt(0)
                 new_p.paragraph_format.space_before = Pt(0)
@@ -52,7 +52,6 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.5), WD_TAB_ALIGNMENT.LEFT)
                     run = new_p.add_run(f"{label.strip()}\t: {detail.strip()}")
                 else:
-                    # NARASI DEFAULT
                     run = new_p.add_run(clean)
                 
                 # 5. HURUF DIPERKECIL (11pt) & TIMES NEW ROMAN
@@ -73,30 +72,35 @@ with st.form("input_form"):
         lamp = st.text_input("Lampiran", value="-")
         tempat = st.text_input("Di (Tempat)", value="Tempat")
     
-    arahan = st.text_area("Instruksi Agenda (Contoh: Rapat tgl 25 jam 8 malam, baju silat):")
+    arahan = st.text_area("Instruksi Agenda:")
     submit = st.form_submit_button("✨ Susun Surat")
 
+# LOGIKA KUNCI EDIT (Biar nggak bocor balik ke awal)
 if submit:
     with st.spinner("Lagi dibikinin sekretaris pintar..."):
         try:
             model = genai.GenerativeModel(get_active_model())
-            prompt = (f"Olah instruksi ini: {arahan}. "
-                      "ATURAN: Jangan buat salam/yth. Fokus ke informasi agenda. "
-                      "Gunakan '---' untuk memisahkan paragraf pembuka dan list agenda.")
-            st.session_state['draf'] = model.generate_content(prompt).text
+            prompt = (f"Olah instruksi ini: {arahan}. JANGAN buat salam/yth. "
+                      "Fokus ke informasi agenda. Pisahkan paragraf dan agenda dengan '---'.")
+            # Simpan hasil AI ke session state
+            st.session_state['draf_psh'] = model.generate_content(prompt).text
         except Exception as e:
             st.error(f"Error AI: {e}")
 
-if 'draf' in st.session_state:
-    st.subheader("📝 Review Draf")
-    draf_final = st.text_area("Edit draf (Gunakan *** untuk geser ke kanan):", value=st.session_state['draf'], height=250)
-    
+if 'draf_psh' in st.session_state:
+    st.subheader("📝 Review & Edit Draf")
+    # Tampilkan box edit, simpan perubahan secara real-time ke session state
+    draf_final = st.text_area("Gunakan *** di awal baris untuk geser paragraf ke kanan:", 
+                              value=st.session_state['draf_psh'], height=300, key="editor_surat")
+    st.session_state['draf_psh'] = draf_final
+
     if st.button("💾 Cetak & Download"):
         try:
             doc = Document("template_psh.docx")
+            # Pake draf_final yang udah lo edit manual
             parts = draf_final.split("---")
             
-            # Update Header (Times New Roman 11pt)
+            # Update Header (Times New Roman 11pt, Rapat)
             h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
@@ -104,6 +108,7 @@ if 'draf' in st.session_state:
             }
             for p in doc.paragraphs:
                 p.paragraph_format.line_spacing = 1.0
+                p.paragraph_format.space_after = Pt(0)
                 for k, v in h_map.items():
                     if k in p.text:
                         p.text = p.text.replace(k, v)
@@ -111,17 +116,17 @@ if 'draf' in st.session_state:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(11)
 
-            # Isi Konten (Ketik ke Tag)
+            # Isi Konten ke Tag {{pembuka}} dan {{agenda}}
             rakit_isi_surat(doc, "{{pembuka}}", parts[0].strip())
             if len(parts) > 1:
                 rakit_isi_surat(doc, "{{agenda}}", parts[1].strip(), is_agenda=True)
 
-            # Hapus tag sisa
+            # Hapus tag sisa agar bersih
             for p in doc.paragraphs:
                 if "{{pembuka}}" in p.text or "{{agenda}}" in p.text: p.text = ""
 
             out = io.BytesIO()
             doc.save(out)
-            st.download_button("📥 Download Surat", data=out.getvalue(), file_name="Surat_PSH_Pintar.docx")
+            st.download_button("📥 Download Surat", data=out.getvalue(), file_name=f"Surat_PSH_{nomor.replace('/','_')}.docx")
         except:
-            st.error("Cek tag {{pembuka}} dan {{agenda}} di template lo!")
+            st.error("Cek apakah tag {{pembuka}} dan {{agenda}} ada di template.docx lo!")
