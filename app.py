@@ -20,37 +20,46 @@ except:
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI PENGISI KONTEN (KUNCI: TIMES NEW ROMAN & POSISI) ---
-def isi_konten_docx(doc, tag, text, is_agenda=False):
+# --- FUNGSI PENGISI KONTEN (LINE KETAT & FITUR INDENTASI) ---
+def rakit_isi_surat(doc, tag, text, is_agenda=False):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
-            # Hapus tag mentah
             paragraph.text = paragraph.text.replace(tag, "")
-            
             lines = text.split('\n')
             for line in lines:
                 clean = re.sub(r'[*#_]', '', line).strip()
                 if not clean: continue
                 
-                # Buat paragraf baru tepat di posisi tag
                 new_p = paragraph.insert_paragraph_before()
+                
+                # 1. DEFAULT RATA KANAN KIRI (JUSTIFY)
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 
+                # 2. PERKETAT JARAK (SINGLE SPACING & NO SPACE AFTER)
+                new_p.paragraph_format.line_spacing = 1.0
+                new_p.paragraph_format.space_after = Pt(0)
+                new_p.paragraph_format.space_before = Pt(0)
+                
+                # 3. FITUR GESER KANAN JIKA ADA ***
+                if line.startswith("***"):
+                    new_p.paragraph_format.left_indent = Inches(0.5)
+                    clean = clean.replace("***", "").strip()
+
                 if is_agenda and ":" in clean:
-                    # Format Poin Agenda (Sejajar di 2.5 inci)
+                    # 4. POIN : HARUS SAMA SEJAJAR
                     label, detail = clean.split(":", 1)
                     new_p.paragraph_format.left_indent = Inches(1.0)
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.5), WD_TAB_ALIGNMENT.LEFT)
                     run = new_p.add_run(f"{label.strip()}\t: {detail.strip()}")
                 else:
-                    # Format Narasi (Menjorok)
-                    new_p.paragraph_format.first_line_indent = Inches(0.5)
+                    # NARASI DEFAULT
                     run = new_p.add_run(clean)
                 
+                # 5. HURUF DIPERKECIL (11pt) & TIMES NEW ROMAN
                 run.font.name = 'Times New Roman'
-                run.font.size = Pt(12)
+                run.font.size = Pt(11)
 
-# --- UI DASHBOARD LENGKAP ---
+# --- UI DASHBOARD ---
 st.title("🛡️ Sekretaris Digital PSH Tegal")
 
 with st.form("input_form"):
@@ -64,51 +73,55 @@ with st.form("input_form"):
         lamp = st.text_input("Lampiran", value="-")
         tempat = st.text_input("Di (Tempat)", value="Tempat")
     
-    arahan = st.text_area("Instruksi (Contoh: Rapat tgl 25 jam 8 malam di TC, baju silat):")
+    arahan = st.text_area("Instruksi Agenda (Contoh: Rapat tgl 25 jam 8 malam, baju silat):")
     submit = st.form_submit_button("✨ Susun Surat")
 
 if submit:
-    try:
-        model = genai.GenerativeModel(get_active_model())
-        prompt = (f"Susun surat resmi PSH Tegal dari instruksi: {arahan}. Pisahkan dengan '---'. "
-                  "Bagian 1: Pembuka formal. Bagian 2: Agenda RINGKAS (Acara, Waktu, Tempat). "
-                  "Bagian 3: Narasi Pakaian & Penutup. Jangan tulis nomor/hal lagi.")
-        st.session_state['draf'] = model.generate_content(prompt).text
-    except Exception as e:
-        st.error(f"Error AI: {e}")
+    with st.spinner("Lagi dibikinin sekretaris pintar..."):
+        try:
+            model = genai.GenerativeModel(get_active_model())
+            prompt = (f"Olah instruksi ini: {arahan}. "
+                      "ATURAN: Jangan buat salam/yth. Fokus ke informasi agenda. "
+                      "Gunakan '---' untuk memisahkan paragraf pembuka dan list agenda.")
+            st.session_state['draf'] = model.generate_content(prompt).text
+        except Exception as e:
+            st.error(f"Error AI: {e}")
 
 if 'draf' in st.session_state:
-    draf_edit = st.text_area("Review draf (Gunakan --- sebagai pemisah):", value=st.session_state['draf'], height=300)
+    st.subheader("📝 Review Draf")
+    draf_final = st.text_area("Edit draf (Gunakan *** untuk geser ke kanan):", value=st.session_state['draf'], height=250)
     
     if st.button("💾 Cetak & Download"):
         try:
             doc = Document("template_psh.docx")
-            parts = draf_edit.split("---")
+            parts = draf_final.split("---")
             
-            # 1. Isi Header & Tanggal (Sesuai image_6b22a2)
-            header_data = {
+            # Update Header (Times New Roman 11pt)
+            h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
                 "{{tanggal}}": f"Tegal, {tgl_surat}"
             }
             for p in doc.paragraphs:
-                for k, v in header_data.items():
+                p.paragraph_format.line_spacing = 1.0
+                for k, v in h_map.items():
                     if k in p.text:
                         p.text = p.text.replace(k, v)
-                        for run in p.runs: run.font.name = 'Times New Roman'
+                        for run in p.runs: 
+                            run.font.name = 'Times New Roman'
+                            run.font.size = Pt(11)
 
-            # 2. Isi Konten ke Posisi Tag (Sesuai image_6c077c)
-            # Pastikan tag {{pembuka}} dan {{agenda}} ada di Word lo!
-            isi_konten_docx(doc, "{{pembuka}}", parts[0].strip())
-            isi_konten_docx(doc, "{{agenda}}", f"{parts[1].strip()}\n\n{parts[2].strip()}", is_agenda=True)
+            # Isi Konten (Ketik ke Tag)
+            rakit_isi_surat(doc, "{{pembuka}}", parts[0].strip())
+            if len(parts) > 1:
+                rakit_isi_surat(doc, "{{agenda}}", parts[1].strip(), is_agenda=True)
 
-            # Hapus sisa paragraf tag yang kosong
+            # Hapus tag sisa
             for p in doc.paragraphs:
-                if "{{pembuka}}" in p.text or "{{agenda}}" in p.text:
-                    p.text = ""
+                if "{{pembuka}}" in p.text or "{{agenda}}" in p.text: p.text = ""
 
             out = io.BytesIO()
             doc.save(out)
-            st.download_button("📥 Download Surat", data=out.getvalue(), file_name="Surat_PSH_Rapi.docx")
+            st.download_button("📥 Download Surat", data=out.getvalue(), file_name="Surat_PSH_Pintar.docx")
         except:
-            st.error("Gagal! Cek apakah template_psh.docx lo punya tag {{pembuka}} dan {{agenda}}.")
+            st.error("Cek tag {{pembuka}} dan {{agenda}} di template lo!")
