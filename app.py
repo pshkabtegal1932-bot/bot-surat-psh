@@ -104,7 +104,7 @@ if 'draf_psh' in st.session_state:
             h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
-                "{{tanggal}}": f"Tegal, {tgl_surat}"
+                "{{tanggal}}": f"{tgl_surat}"
             }
             for p in doc.paragraphs:
                 p.paragraph_format.line_spacing = 1.0
@@ -130,3 +130,4 @@ if 'draf_psh' in st.session_state:
             st.download_button("📥 Download Surat", data=out.getvalue(), file_name=f"Surat_PSH_{nomor.replace('/','_')}.docx")
         except:
             st.error("Cek apakah tag {{pembuka}} dan {{agenda}} ada di template.docx lo!")
+
