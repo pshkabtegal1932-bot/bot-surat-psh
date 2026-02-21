@@ -6,20 +6,24 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 
-# --- KONEKSI AI (DIPAKSA KE 1.5 FLASH BIAR JATAH BANYAK) ---
+# --- KONEKSI AI (SISTEM DETEKSI MODEL PALING STABIL) ---
 try:
     import google.generativeai as genai
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
     def panggil_ai_pintar(prompt):
         try:
-            # Pake 1.5-flash karena jatahnya 1500/hari, bukan 20/hari kayak versi 2.5
-            model = genai.GenerativeModel("models/gemini-1.5-flash")
+            # Cari model yang beneran aktif di akun lo sekarang
+            active_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            # Ambil yang pertama (biasanya gemini-1.5-flash atau pro)
+            model_id = active_models[0] if active_models else "models/gemini-1.5-flash"
+            
+            model = genai.GenerativeModel(model_id)
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
             if "429" in str(e):
-                return "LIMIT_GOOGLE_HABIS: Jatah harian Google abis, Bro! Ketik manual aja di bawah sini, tombol CETAK tetep bisa dipake kok."
+                return "LIMIT_GOOGLE: Jatah abis, Bro! Ketik manual aja di kotak bawah, tombol DOWNLOAD tetep sakti kok."
             return f"ERROR_SISTEM: {str(e)}"
 except:
     st.error("API Key belum diset di Secrets!")
@@ -27,7 +31,7 @@ except:
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI RAKIT DOCX (KUNCI: 11PT, RAPAT, JUSTIFY) ---
+# --- FUNGSI RAKIT DOCX (KUNCI FORMAT) ---
 def rakit_isi_surat(doc, tag, text, is_agenda=False):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
@@ -38,22 +42,17 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 if not raw_line: continue
                 
                 new_p = paragraph.insert_paragraph_before()
-                
-                # 1. RATA KANAN KIRI
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-                
-                # 2. JARAK BARIS SINGLE (RAPAT)
                 new_p.paragraph_format.line_spacing = 1.0
                 new_p.paragraph_format.space_after = Pt(0)
                 new_p.paragraph_format.space_before = Pt(0)
                 
-                # 3. FITUR *** UNTUK AWAL PARAGRAF MENJOROK
+                # Fitur *** awal paragraf masuk
                 clean_text = re.sub(r'[*#_]', '', raw_line).strip()
                 if raw_line.startswith("***"):
                     new_p.paragraph_format.first_line_indent = Inches(0.5)
                 
                 if is_agenda and ":" in clean_text:
-                    # 4. POIN AGENDA SEJAJAR
                     label, detail = clean_text.split(":", 1)
                     new_p.paragraph_format.left_indent = Inches(1.0)
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.5), WD_TAB_ALIGNMENT.LEFT)
@@ -61,7 +60,6 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 else:
                     run = new_p.add_run(clean_text)
                 
-                # 5. TIMES NEW ROMAN 11pt
                 run.font.name = 'Times New Roman'
                 run.font.size = Pt(11)
 
@@ -73,7 +71,7 @@ with st.container():
     with col1:
         nomor = st.text_input("Nomor Surat", value="005/PSH/II/2026")
         hal = st.text_input("Perihal (Hal)", value="Undangan Rapat")
-        tgl_surat = st.text_input("Tanggal Surat (Tegal, ...)", value="21 Februari 2026")
+        tgl_surat = st.text_input("Tanggal Surat", value="21 Februari 2026")
     with col2:
         yth = st.text_input("Kepada Yth", value="Seluruh Warga PSH Tegal")
         lamp = st.text_input("Lampiran", value="-")
@@ -81,19 +79,18 @@ with st.container():
 
 arahan = st.text_area("Instruksi Agenda:")
 
-# TOMBOL GENERATE (Hanya panggil AI pas diklik)
 if st.button("✨ Susun Surat"):
     if arahan:
-        with st.spinner("AI lagi ngerangkai kata..."):
-            prompt = (f"Olah instruksi: {arahan}. Fokus ke isi & agenda. "
-                      "Pisahkan narasi dan list agenda dengan '---'. TANPA SALAM/YTH.")
+        with st.spinner("Lagi mikir..."):
+            prompt = (f"Buat isi surat resmi PSH Tegal: {arahan}. "
+                      "Pisahkan bagian pembuka dan agenda pakai '---'. JANGAN buat salam.")
             st.session_state['draf_psh'] = panggil_ai_pintar(prompt)
     else:
-        st.warning("Isi dulu instruksinya!")
+        st.warning("Isi dulu arahannya!")
 
-# AREA EDIT & DOWNLOAD (TETAP JALAN BIARPUN AI LIMIT)
 if 'draf_psh' in st.session_state:
     st.subheader("📝 Review & Edit Draf")
+    # Biar gak ilang pas diketik manual
     draf_final = st.text_area("Gunakan *** di awal baris untuk paragraf masuk:", 
                               value=st.session_state['draf_psh'], 
                               height=300)
@@ -103,7 +100,7 @@ if 'draf_psh' in st.session_state:
             doc = Document("template_psh.docx")
             parts = draf_final.split("---")
             
-            # Update Header (Tanggal sesuai input murni)
+            # Header
             h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
@@ -119,12 +116,12 @@ if 'draf_psh' in st.session_state:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(11)
 
-            # Masukkan isi (Pembuka & Agenda)
+            # Isi
             rakit_isi_surat(doc, "{{pembuka}}", parts[0].strip())
             if len(parts) > 1:
                 rakit_isi_surat(doc, "{{agenda}}", parts[1].strip(), is_agenda=True)
 
-            # Bersihkan tag yang tersisa
+            # Bersih-bersih
             for p in doc.paragraphs:
                 if "{{pembuka}}" in p.text or "{{agenda}}" in p.text: p.text = ""
 
