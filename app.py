@@ -9,7 +9,7 @@ import google.generativeai as genai
 
 # --- KONFIGURASI ---
 # Ganti dengan API Key kamu
-GEMINI_API_KEY = "AIzaSyBtoq-CLs6GMZYzMFS6tYrBrefXRJYG5Bo"
+GEMINI_API_KEY = "AIzaSyBID3bexqOOkMXXPsINmhupQ2en3AomS-I"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Solusi Anti-Error 404: Menggunakan path lengkap yang diminta API v1beta
@@ -131,3 +131,4 @@ if 'draf_final' in st.session_state:
             )
         except Exception as e:
             st.error(f"Gagal cetak: {str(e)}")
+
