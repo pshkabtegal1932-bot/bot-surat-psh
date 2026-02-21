@@ -18,7 +18,6 @@ except Exception:
 @st.cache_resource
 def load_ai_model():
     try:
-        # Mencari daftar model otomatis agar tidak 404
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         model_name = 'models/gemini-1.5-flash' if 'models/gemini-1.5-flash' in available_models else available_models[0]
         return genai.GenerativeModel(model_name)
@@ -28,87 +27,98 @@ def load_ai_model():
 
 model = load_ai_model()
 
-st.set_page_config(page_title="PSH Tegal Dashboard", page_icon="📝")
+st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI TANGGAL INDO ---
+# --- FUNGSI TANGGAL ---
 def get_tanggal_indo():
     bulan_indo = {1: "Januari", 2: "Februari", 3: "Maret", 4: "April", 5: "Mei", 6: "Juni",
                   7: "Juli", 8: "Agustus", 9: "September", 10: "Oktober", 11: "November", 12: "Desember"}
     now = datetime.datetime.now()
     return f"{now.day} {bulan_indo[now.month]} {now.year}"
 
-# --- FUNGSI FORMATTING SEKRETARIS ---
+# --- LOGIKA FORMATTING PRO ---
 def format_surat_sekretaris(doc, tag, content):
     """
-    Mengisi konten ke template dengan gaya surat resmi:
-    Paragraf rapi (Justify) dan Poin-poin dengan titik dua lurus.
+    Logika cerdas untuk membedakan paragraf narasi dan daftar poin acara.
     """
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
+            # Hapus tag template
             paragraph.text = paragraph.text.replace(tag, "")
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             
             lines = content.split('\n')
             for i, line in enumerate(lines):
                 clean_line = re.sub(r'[*#_]', '', line).strip()
                 if not clean_line: continue
                 
-                run = paragraph.add_run(clean_line)
+                # Buat baris baru di dalam paragraf yang sama atau paragraf baru
+                if i > 0:
+                    new_p = doc.add_paragraph()
+                else:
+                    new_p = paragraph
+                
+                new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                
+                # JIKA BARIS ADALAH POIN (Ada titik dua)
+                if ":" in clean_line and len(clean_line.split(":")[0]) < 20:
+                    label, detail = clean_line.split(":", 1)
+                    # Beri tabulasi ke kanan (indent)
+                    new_p.paragraph_format.left_indent = Inches(0.5)
+                    # Titik dua sejajar di 2.0 inci
+                    tab_stops = new_p.paragraph_format.tab_stops
+                    tab_stops.add_tab_stop(Inches(2.0), WD_TAB_ALIGNMENT.LEFT)
+                    
+                    run = new_p.add_run(f"{label.strip()}\t: {detail.strip()}")
+                else:
+                    # JIKA PARAGRAF NARASI
+                    new_p.paragraph_format.left_indent = Inches(0)
+                    new_p.paragraph_format.first_line_indent = Inches(0.5) # Baris pertama menjorok
+                    run = new_p.add_run(clean_line)
+                
                 run.font.name = 'Times New Roman'
                 run.font.size = Pt(12)
-                
-                # Jika baris mengandung titik dua, buat tabulasi lurus
-                if ":" in clean_line:
-                    paragraph.paragraph_format.tab_stops.add_tab_stop(Inches(1.5), WD_TAB_ALIGNMENT.LEFT)
-                
-                if i < len(lines) - 1:
-                    paragraph.add_run("\n")
 
 # --- UI DASHBOARD ---
 st.title("🛡️ Sekretaris Digital PSH Tegal")
-st.info("Ketik poin-poinnya saja, AI yang akan merangkai kalimat resminya.")
 
 with st.form("input_surat"):
     col1, col2 = st.columns(2)
     with col1:
-        nomor = st.text_input("Nomor Surat", placeholder="Contoh: 001/PSH/2026")
-        hal = st.text_input("Perihal", placeholder="Contoh: Undangan Halal Bi Halal")
+        nomor = st.text_input("Nomor Surat", placeholder="Contoh: 003/PENGKAB.PSH/II/2026")
+        hal = st.text_input("Perihal", placeholder="Contoh: Edaran Agenda PSH")
     with col2:
         yth = st.text_input("Kepada Yth", placeholder="Contoh: Seluruh Warga PSH Tegal")
     
-    arahan = st.text_area("Apa inti suratnya?", placeholder="Contoh: Halal bihalal tanggal 24 maret di TC PSH jam 9 pagi, baju silat...")
+    arahan = st.text_area("Tulis Arahan/Inti Pesan:", placeholder="Contoh: Halal bihalal tgl 29 maret jam 10 pagi, tempat nyusul...")
     submit = st.form_submit_button("✨ Susun Surat Resmi")
 
 if submit:
-    if not arahan:
-        st.error("Kasih arahan dulu ke Sekretarisnya, Bro!")
-    else:
-        with st.spinner("Sekretaris sedang mengetik..."):
-            try:
-                # PROMPT BARU: AI dipaksa jadi Sekretaris yang sopan
-                prompt = (f"Bertindaklah sebagai Sekretaris PSH Tegal. Buatlah isi surat resmi berdasarkan arahan ini: {arahan}. "
-                          "Gunakan struktur berikut: "
-                          "1. Kalimat pembuka: 'Sehubungan dengan...' atau 'Dalam rangka...' yang relevan. "
-                          "2. Kalimat pengantar sebelum poin. "
-                          "3. Rincian acara dengan format 'Label : Isi' (Gunakan Huruf Kapital di awal kata saja). "
-                          "4. Kalimat penutup yang formal dan sopan. "
-                          "HANYA TULIS ISINYA SAJA. Jangan tulis salam Assalamuallaikum karena sudah ada di template.")
-                
-                response = model.generate_content(prompt)
-                st.session_state['draf_final'] = response.text.strip()
-            except Exception as e:
-                st.error(f"Error AI: {str(e)}")
+    with st.spinner("Sekretaris sedang merangkai kalimat..."):
+        try:
+            # PROMPT SUPER SEKRETARIS
+            prompt = (f"Bertindaklah sebagai Sekretaris Organisasi Pencak Silat PSH Tegal. "
+                      f"Buat isi surat resmi dari arahan ini: {arahan}. "
+                      "ATURAN WAJIB: "
+                      "1. Awali dengan paragraf pembuka yang luwes (Contoh: Sehubungan dengan agenda PSH Tegal, dengan ini kami sampaikan...). "
+                      "2. Gunakan bahasa yang sopan dan persaudaraan. "
+                      "3. Jika ada rincian (Waktu, Tempat, Acara), tulis dalam baris terpisah dengan format 'Label : Isi'. "
+                      "4. Akhiri dengan paragraf penutup yang berisi harapan dan terima kasih (Contoh: Demikian surat ini kami buat, atas partisipasi sedulur semua kami haturkan Terimakasih). "
+                      "5. JANGAN TULIS SALAM (Assalammualaikum) karena sudah ada di kertas surat. "
+                      "6. Gunakan huruf kapital hanya di awal kata, jangan CAPSLOCK semua.")
+            
+            response = model.generate_content(prompt)
+            st.session_state['draf_final'] = response.text.strip()
+        except Exception as e:
+            st.error(f"Gagal: {e}")
 
-# --- EDITOR & DOWNLOAD ---
 if 'draf_final' in st.session_state:
-    st.subheader("📝 Review Draf Sekretaris")
-    isi_final = st.text_area("Kamu bisa perbaiki kalimatnya di sini:", value=st.session_state['draf_final'], height=350)
-    st.session_state['draf_final'] = isi_final
+    st.subheader("📝 Review & Edit")
+    isi_edit = st.text_area("Edit draf jika dirasa kurang pas:", value=st.session_state['draf_final'], height=350)
+    st.session_state['draf_final'] = isi_edit
 
-    if st.button("💾 Cetak ke Word"):
+    if st.button("💾 Generate Word"):
         try:
             doc = Document("template_psh.docx")
-            # Isi Header
             mapping = {"{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth, "{{tanggal}}": get_tanggal_indo()}
             
             for old, new in mapping.items():
@@ -119,16 +129,14 @@ if 'draf_final' in st.session_state:
                                 run.text = run.text.replace(old, str(new))
                                 run.font.name = 'Times New Roman'
 
-            # Isi Konten (Mengganti {{isi}} atau {{agenda}})
             format_surat_sekretaris(doc, "{{isi}}", st.session_state['draf_final'])
-            format_surat_sekretaris(doc, "{{agenda}}", st.session_state['draf_final'])
-
+            
             output = io.BytesIO()
             doc.save(output)
-            st.session_state['file_jadi'] = output.getvalue()
-            st.success("Surat sudah rapi dan siap didownload!")
+            st.session_state['file_ok'] = output.getvalue()
+            st.success("Surat berhasil dirakit!")
         except Exception as e:
-            st.error(f"Gagal: {e}")
+            st.error(f"Error Word: {e}")
 
-    if 'file_jadi' in st.session_state:
-        st.download_button("📥 Download Surat (Word)", data=st.session_state['file_jadi'], file_name=f"Surat_PSH_{nomor.replace('/','-')}.docx")
+    if 'file_ok' in st.session_state:
+        st.download_button("📥 Download Surat", data=st.session_state['file_ok'], file_name=f"Surat_PSH_{datetime.date.today()}.docx")
