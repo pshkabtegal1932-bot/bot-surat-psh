@@ -6,38 +6,30 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 
-# --- KONEKSI AI (SISTEM DETEKSI MODEL OTOMATIS) ---
+# --- KONEKSI AI (DIPERBAIKI) ---
 try:
     import google.generativeai as genai
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
     
     def panggil_ai_pintar(prompt):
-        # Cari model yang beneran ada & dukung generateContent
         try:
-            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            # Prioritaskan gemini-1.5-flash kalau ada, kalau gak ada ambil yang pertama
-            model_name = "models/gemini-1.5-flash" if "models/gemini-1.5-flash" in available_models else available_models[0]
-        except:
-            model_name = "models/gemini-1.5-flash" # Fallback terakhir
-
-        for i in range(3):
-            try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(prompt)
-                return response.text
-            except Exception as e:
-                if "429" in str(e):
-                    time.sleep(2)
-                    continue
-                return f"Gagal merangkai kata: {str(e)}"
-        return "Limit habis, coba lagi nanti."
+            # Cari model yang tersedia secara dinamis
+            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            m_name = models[0] if models else "models/gemini-1.5-flash"
+            
+            model = genai.GenerativeModel(m_name)
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            # Jika error beneran (bukan limit), kita tampilin apa adanya biar lo tau
+            return f"ERROR_SISTEM: {str(e)}"
 except:
-    st.error("API Key belum diset di Secrets!")
+    st.error("API Key di Secrets belum bener, Bro!")
     st.stop()
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- FUNGSI RAKIT ISI (TETAP KETAT & RAPI) ---
+# --- FUNGSI RAKIT DOCX (KUNCI FORMAT 11PT & SINGLE SPACING) ---
 def rakit_isi_surat(doc, tag, text, is_agenda=False):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
@@ -53,7 +45,7 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
                 new_p.paragraph_format.space_after = Pt(0)
                 new_p.paragraph_format.space_before = Pt(0)
                 
-                # Fitur *** untuk awal paragraf menjorok
+                # Fitur *** untuk indentasi awal paragraf
                 clean_text = re.sub(r'[*#_]', '', raw_line).strip()
                 if raw_line.startswith("***"):
                     new_p.paragraph_format.first_line_indent = Inches(0.5)
@@ -72,37 +64,45 @@ def rakit_isi_surat(doc, tag, text, is_agenda=False):
 # --- UI DASHBOARD ---
 st.title("🛡️ Sekretaris Digital PSH Tegal")
 
-with st.form("input_form"):
+# Input Header
+with st.container():
     col1, col2 = st.columns(2)
     with col1:
         nomor = st.text_input("Nomor Surat", value="005/PSH/II/2026")
         hal = st.text_input("Perihal (Hal)", value="Undangan Rapat")
-        tgl_surat = st.text_input("Tanggal Surat (Tegal, ...)", value="21 Februari 2026")
+        tgl_surat = st.text_input("Tanggal Surat", value="21 Februari 2026")
     with col2:
         yth = st.text_input("Kepada Yth", value="Seluruh Warga PSH Tegal")
         lamp = st.text_input("Lampiran", value="-")
         tempat = st.text_input("Di (Tempat)", value="Tempat")
-    
-    arahan = st.text_area("Instruksi Agenda:")
-    submit = st.form_submit_button("✨ Susun Surat")
 
-if submit:
-    with st.spinner("Lagi dibikinin sekretaris pintar..."):
-        prompt = (f"Olah instruksi: {arahan}. DILARANG buat salam/yth/alamat. "
-                  "Fokus ke inti informasi. Gunakan '---' sebagai pemisah bagian.")
-        st.session_state['draf_psh'] = panggil_ai_pintar(prompt)
+arahan = st.text_area("Instruksi Agenda (AI cuma jalan kalau tombol diklik):")
 
+# TOMBOL GENERATE (Hanya jalan sekali per klik)
+if st.button("✨ Susun Surat"):
+    if arahan:
+        with st.spinner("AI lagi kerja..."):
+            prompt = (f"Buat isi surat resmi PSH Tegal dari instruksi: {arahan}. "
+                      "Hanya tulis narasi dan agenda. Pisahkan dengan '---'. TANPA SALAM.")
+            st.session_state['draf_psh'] = panggil_ai_pintar(prompt)
+    else:
+        st.warning("Isi dulu instruksinya, Bro!")
+
+# AREA EDIT & CETAK (Terpisah dari Generate)
 if 'draf_psh' in st.session_state:
     st.subheader("📝 Review & Edit Draf")
-    draf_final = st.text_area("Edit manual (Gunakan *** untuk paragraf menjorok):", 
-                              value=st.session_state['draf_psh'], height=300, key="editor_surat")
-    st.session_state['draf_psh'] = draf_final
-
+    
+    # Kunci input manual biar nggak panggil AI lagi
+    draf_final = st.text_area("Edit manual (*** = paragraf masuk):", 
+                              value=st.session_state['draf_psh'], 
+                              height=300)
+    
     if st.button("💾 Cetak & Download"):
         try:
             doc = Document("template_psh.docx")
             parts = draf_final.split("---")
             
+            # Update Header
             h_map = {
                 "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
                 "{{lamp}}": lamp, "{{tempat}}": tempat,
@@ -118,10 +118,12 @@ if 'draf_psh' in st.session_state:
                             run.font.name = 'Times New Roman'
                             run.font.size = Pt(11)
 
+            # Isi Konten ke {{pembuka}} dan {{agenda}}
             rakit_isi_surat(doc, "{{pembuka}}", parts[0].strip())
             if len(parts) > 1:
                 rakit_isi_surat(doc, "{{agenda}}", parts[1].strip(), is_agenda=True)
 
+            # Bersihkan tag
             for p in doc.paragraphs:
                 if "{{pembuka}}" in p.text or "{{agenda}}" in p.text: p.text = ""
 
