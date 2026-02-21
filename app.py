@@ -6,26 +6,18 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 
-# --- KONEKSI AMAN & DETEKSI MODEL OTOMATIS ---
+# --- KONEKSI AMAN & HANDLING QUOTA ---
 try:
     import google.generativeai as genai
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
-    
-    # Fungsi cerdas cari model yang support generateContent (biar gak 404)
-    def get_active_model():
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                if 'gemini-1.5-flash' in m.name or 'gemini-pro' in m.name:
-                    return m.name
-        return "models/gemini-pro"
-except Exception as e:
-    st.error(f"Waduh, koneksi gagal: {e}")
+except:
+    st.error("Waduh, cek API Key di Secrets Streamlit lo!")
     st.stop()
 
 st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
 
-# --- LOGIKA RAKIT SURAT (TIMES NEW ROMAN + CERDAS) ---
+# --- FUNGSI RAKIT SURAT (TIMES NEW ROMAN MUTLAK) ---
 def rakit_isi_surat(doc, tag, content):
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
@@ -39,14 +31,14 @@ def rakit_isi_surat(doc, tag, content):
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 new_p.paragraph_format.line_spacing = 1.15
                 
-                # POIN AGENDA (Titik dua lurus di 2.5 inci)
+                # LOGIKA POIN RINGKAS (Acara, Tanggal, Waktu, Tempat)
                 if ":" in clean_line and len(clean_line.split(":")[0]) < 20:
                     label, detail = clean_line.split(":", 1)
                     new_p.paragraph_format.left_indent = Inches(1.0)
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.5), WD_TAB_ALIGNMENT.LEFT)
                     run = new_p.add_run(f"{label.strip()}\t: {detail.strip()}")
                 else:
-                    # NARASI (Pembuka, Pakaian, Penutup) - Menjorok ke dalam
+                    # NARASI (Pembuka, Pakaian, Penutup)
                     new_p.paragraph_format.first_line_indent = Inches(0.5)
                     run = new_p.add_run(clean_line)
                 
@@ -65,30 +57,33 @@ with st.form("input_psh"):
     with col2:
         yth = st.text_input("Kepada Yth", value="Seluruh Warga PSH Tegal")
     
-    arahan = st.text_area("Instruksi (Contoh: Rapat tgl 25 jam 8 malam di TC, baju silat lengkap):")
-    submit = st.form_submit_button("✨ Susun Surat Resmi")
+    arahan = st.text_area("Instruksi (Contoh: Rapat tgl 25 jam 8 malam di TC, baju silat):")
+    submit = st.form_submit_button("✨ Susun Surat")
 
 if submit:
-    with st.spinner("AI sedang berpikir..."):
+    with st.spinner("AI sedang merakit kalimat..."):
         try:
-            active_model_name = get_active_model()
-            model = genai.GenerativeModel(active_model_name)
-            prompt = (f"Bertindaklah sebagai Sekretaris PSH Tegal. Susun surat resmi dari arahan: {arahan}. "
-                      "ATURAN: "
-                      "1. Paragraf Pembuka: Formal & sopan. "
-                      "2. Agenda: Hanya POIN RINGKAS (Acara, Tanggal, Waktu, Tempat). "
-                      "3. Pakaian: JANGAN JADI POIN. Tulis dalam satu paragraf setelah agenda. "
-                      "4. Paragraf Penutup: Harus ada (Demikian surat ini...). "
-                      "5. Tanpa salam pembuka dan nomor surat.")
+            # Gunakan model Flash yang lebih ringan kuotanya
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = (f"Susun surat resmi PSH Tegal dari: {arahan}. "
+                      "ATURAN KERAS: "
+                      "1. Paragraf Pembuka: Formal. "
+                      "2. Agenda: POIN RINGKAS (Acara, Tanggal, Waktu, Tempat). "
+                      "3. Pakaian: JANGAN JADI POIN. Tulis dalam narasi paragraf setelah agenda. "
+                      "4. Paragraf Penutup: Harus ada. "
+                      "5. Tanpa salam pembuka/nomor.")
             response = model.generate_content(prompt)
             st.session_state['draf_raw'] = response.text
         except Exception as e:
-            st.error(f"Gagal generate: {e}")
+            if "429" in str(e):
+                st.error("Kuota Gratisan Habis! Tunggu 1 menit atau ganti API Key baru, Kontol!")
+            else:
+                st.error(f"Error: {e}")
 
 # --- EDIT & DOWNLOAD ---
 if 'draf_raw' in st.session_state:
     st.subheader("📝 Review & Edit")
-    draf_edit = st.text_area("Sesuaikan kalimat sebelum dicetak:", value=st.session_state['draf_raw'], height=300)
+    draf_edit = st.text_area("Sesuaikan draf:", value=st.session_state['draf_raw'], height=300)
     st.session_state['draf_raw'] = draf_edit
 
     c1, c2 = st.columns(2)
@@ -96,7 +91,7 @@ if 'draf_raw' in st.session_state:
         if st.button("💾 Cetak ke Word"):
             try:
                 doc = Document("template_psh.docx")
-                # Update Header (Kunci Times New Roman)
+                # Update Header (Times New Roman)
                 h_map = {"{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth, "{{tanggal}}": "Tegal, 21 Februari 2026"}
                 for p in doc.paragraphs:
                     for k, v in h_map.items():
@@ -111,7 +106,7 @@ if 'draf_raw' in st.session_state:
                 st.session_state['file_ok'] = out.getvalue()
                 st.success("Surat Ready!")
             except:
-                st.error("Gagal! Pastikan file 'template_psh.docx' ada di GitHub.")
+                st.error("Gagal! Pastikan 'template_psh.docx' ada di GitHub.")
     
     with c2:
         if st.button("🗑️ Reset"):
