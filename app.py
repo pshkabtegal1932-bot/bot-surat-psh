@@ -8,10 +8,16 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 import google.generativeai as genai
 
 # --- KONFIGURASI ---
-# Ganti dengan API Key kamu yang baru jika masih kena limit 429
+# Ganti dengan API Key kamu
 GEMINI_API_KEY = "AIzaSyBtoq-CLs6GMZYzMFS6tYrBrefXRJYG5Bo"
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+
+# Solusi Anti-Error 404: Menggunakan path lengkap yang diminta API v1beta
+try:
+    model = genai.GenerativeModel("models/gemini-1.5-flash")
+except:
+    model = genai.GenerativeModel("models/gemini-pro")
+
 st.set_page_config(page_title="PSH Tegal Dashboard", page_icon="📝")
 
 # --- FUNGSI PENDUKUNG ---
@@ -22,12 +28,17 @@ def get_tanggal_indo():
     return f"{now.day} {bulan_indo[now.month]} {now.year}"
 
 def format_word_pro(doc, tag, content):
+    """
+    Menangani Justify dan Tabulasi agar titik dua (:) lurus sempurna.
+    """
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
             paragraph.text = paragraph.text.replace(tag, "")
             paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            
             tab_stops = paragraph.paragraph_format.tab_stops
             tab_stops.add_tab_stop(Inches(1.5), WD_TAB_ALIGNMENT.LEFT)
+            
             lines = content.split('\n')
             for i, line in enumerate(lines):
                 if ":" in line:
@@ -35,6 +46,7 @@ def format_word_pro(doc, tag, content):
                     run = paragraph.add_run(f"{label.strip()}\t: {detail.strip()}")
                 else:
                     run = paragraph.add_run(line)
+                
                 run.font.name = 'Times New Roman'
                 run.font.size = Pt(12)
                 if i < len(lines) - 1:
@@ -63,29 +75,38 @@ if submit_ai:
     else:
         with st.spinner("AI sedang berpikir..."):
             try:
+                # Prompt tetap sama seperti fitur sebelumnya
                 prompt = (f"Buat isi surat resmi PSH Tegal dari: {agenda_input}. "
                           "Formal, indentasi, format LABEL : ISI, penutup sopan, tanpa salam, tanpa markdown.")
+                
                 response = model.generate_content(prompt)
                 draf_hasil = re.sub(r'[*#_]', '', response.text).strip()
                 
                 # Simpan di session agar tidak hilang saat klik download
                 st.session_state['draf_final'] = draf_hasil
                 st.success("Draf berhasil disusun!")
-                st.text_area("Edit Hasil AI (Jika perlu):", value=draf_hasil, height=250, key="editor_draf")
+                
             except Exception as e:
                 st.error(f"Error AI: {str(e)}")
 
-# --- TOMBOL CETAK ---
+# Tampilkan Editor jika draf sudah ada
 if 'draf_final' in st.session_state:
+    isi_edit = st.text_area("Edit Hasil AI (Jika perlu):", value=st.session_state['draf_final'], height=250)
+    st.session_state['draf_final'] = isi_edit # Update session dengan editan user
+
     if st.button("📄 Buat File Word"):
         try:
             doc = Document("template_psh.docx")
+            
             mapping = {
-                "{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth,
+                "{{nomor}}": nomor, 
+                "{{hal}}": hal, 
+                "{{yth}}": yth,
                 "{{pembuka}}": "Assalamu’alaikum Warahmatullahi Wabarakatuh,\nSalam Persaudaraan,",
                 "{{tanggal}}": get_tanggal_indo()
             }
             
+            # Replace tag standar
             for old, new in mapping.items():
                 for p in doc.paragraphs:
                     if old in p.text:
@@ -94,9 +115,9 @@ if 'draf_final' in st.session_state:
                                 run.text = run.text.replace(old, str(new))
                                 run.font.name = 'Times New Roman'
 
-            isi_final = st.session_state.get("editor_draf", st.session_state['draf_final'])
-            format_word_pro(doc, "{{agenda}}", isi_final)
-            format_word_pro(doc, "{{isi}}", isi_final)
+            # Gunakan fungsi Pro untuk isi surat
+            format_word_pro(doc, "{{agenda}}", st.session_state['draf_final'])
+            format_word_pro(doc, "{{isi}}", st.session_state['draf_final'])
 
             output = io.BytesIO()
             doc.save(output)
@@ -109,6 +130,4 @@ if 'draf_final' in st.session_state:
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
         except Exception as e:
-
             st.error(f"Gagal cetak: {str(e)}")
-
