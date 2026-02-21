@@ -7,37 +7,37 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
 import google.generativeai as genai
 
-# --- KONEKSI AMAN (MENGAMBIL DARI SECRETS) ---
+# --- KONEKSI AMAN (AMBIL DARI SECRETS) ---
 try:
-    # Memanggil API Key secara aman dari Secrets Streamlit Cloud
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=GEMINI_API_KEY)
 except Exception:
-    st.error("Error: API Key belum diisi di menu Secrets Streamlit!")
+    st.error("Waduh, API Key belum disetting di Secrets Streamlit!")
     st.stop()
 
 @st.cache_resource
 def load_ai_model():
     try:
-        # Mencari model yang tersedia secara otomatis
         available = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         name = 'models/gemini-1.5-flash' if 'models/gemini-1.5-flash' in available else available[0]
         return genai.GenerativeModel(name)
     except:
-        st.error("Gagal koneksi ke server AI Google.")
+        st.error("Koneksi AI Bermasalah!")
         st.stop()
 
 model = load_ai_model()
 
-st.set_page_config(page_title="Sekretaris PSH Tegal", page_icon="📝")
-
-# --- LOGIKA PENULISAN SURAT SEKRETARIS ---
-def format_surat_sekretaris(doc, tag, content):
+# --- FUNGSI FORMATTING SESUAI KEINGINAN ---
+def isi_ke_template(doc, tag, content):
     """
-    Mengatur paragraf menjorok dan poin-poin dengan titik dua sejajar.
+    Menghapus tag {{isi}} dan menggantinya dengan ketikan Sekretaris:
+    - Paragraf Pembuka (Menjorok)
+    - Poin-poin (Titik dua lurus di 2 inci)
+    - Paragraf Penutup (Menjorok)
     """
     for paragraph in doc.paragraphs:
         if tag in paragraph.text:
+            # Hapus tag {{isi}} dari paragraf tersebut
             paragraph.text = paragraph.text.replace(tag, "")
             
             lines = content.split('\n')
@@ -45,19 +45,20 @@ def format_surat_sekretaris(doc, tag, content):
                 clean_line = re.sub(r'[*#_]', '', line).strip()
                 if not clean_line: continue
                 
+                # Buat baris baru sebagai paragraf resmi
                 new_p = doc.add_paragraph()
                 new_p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 
-                # FORMAT POIN (Contoh: Acara : Halal Bihalal)
+                # JIKA BARIS ADALAH POIN ACARA (Ada titik dua)
                 if ":" in clean_line and len(clean_line.split(":")[0]) < 25:
                     label, detail = clean_line.split(":", 1)
-                    new_p.paragraph_format.left_indent = Inches(0.5)
-                    # Titik dua lurus di 2.0 inci
+                    new_p.paragraph_format.left_indent = Inches(0.5) # Geser ke kanan
+                    # Meluruskan titik dua di 2.0 inci
                     new_p.paragraph_format.tab_stops.add_tab_stop(Inches(2.0), WD_TAB_ALIGNMENT.LEFT)
                     run = new_p.add_run(f"{label.strip()}\t: {detail.strip()}")
                 else:
-                    # FORMAT PARAGRAF NARASI
-                    new_p.paragraph_format.first_line_indent = Inches(0.5)
+                    # JIKA PARAGRAF NARASI (PEMBUKA/PENUTUP)
+                    new_p.paragraph_format.first_line_indent = Inches(0.5) # Baris pertama menjorok
                     run = new_p.add_run(clean_line)
                 
                 run.font.name = 'Times New Roman'
@@ -65,48 +66,41 @@ def format_surat_sekretaris(doc, tag, content):
 
 # --- UI DASHBOARD ---
 st.title("🛡️ Sekretaris Digital PSH Tegal")
-st.info("Status: Online. AI akan menyusun kalimat sesuai pakem surat resmi PSH.")
 
-with st.form("form_surat"):
+with st.form("input_sekretaris"):
     col1, col2 = st.columns(2)
     with col1:
-        nomor = st.text_input("Nomor Surat", placeholder="Contoh: 003/PENGKAB.PSH/II/2026")
-        hal = st.text_input("Perihal", placeholder="Contoh: Undangan Kegiatan")
+        nomor = st.text_input("Nomor Surat", placeholder="003/PENGKAB.PSH/II/2026")
+        hal = st.text_input("Perihal", placeholder="Undangan Rapat")
     with col2:
-        yth = st.text_input("Kepada Yth", placeholder="Contoh: Seluruh Warga PSH Tegal")
+        yth = st.text_input("Kepada Yth", placeholder="Seluruh Warga PSH")
     
-    arahan = st.text_area("Inti Pesan:", placeholder="Tulis instruksi di sini (Contoh: Rapat tgl 25 jam 8 malam di TC)...")
-    submit = st.form_submit_button("✨ Susun Kalimat Resmi")
+    arahan = st.text_area("Instruksi Surat:", placeholder="Contoh: Rapat tgl 25 jam 8 malam di TC...")
+    submit = st.form_submit_button("✨ Susun & Masukkan ke Template")
 
 if submit:
-    with st.spinner("Sekretaris sedang merangkai kata..."):
+    with st.spinner("Sekretaris sedang mengetik di template..."):
         try:
-            prompt = (f"Bertindaklah sebagai Sekretaris PSH Tegal. Susun isi surat dari arahan ini: {arahan}. "
-                      "INSTRUKSI KHUSUS: "
-                      "1. Pakai kalimat pembuka 'Sehubungan dengan...' yang luwes. "
-                      "2. Gunakan gaya bahasa persaudaraan yang sopan. "
-                      "3. Poin rincian (Waktu, Tempat, dll) harus berformat 'Label : Isi'. "
-                      "4. Tambahkan paragraf penutup 'Demikian surat ini kami sampaikan...'. "
-                      "5. JANGAN menulis salam 'Assalamu'alaikum' (Sudah ada di template). "
-                      "6. Gunakan huruf kapital normal (Bukan CAPSLOCK).")
-            
+            prompt = (f"Bertindaklah sebagai Sekretaris PSH Tegal. Susun isi surat dari arahan: {arahan}. "
+                      "Wajib ada paragraf pembuka 'Sehubungan dengan...', poin-poin acara yang rapi, "
+                      "dan paragraf penutup 'Demikian surat ini...'. Jangan tulis salam dan nomor surat lagi.")
             response = model.generate_content(prompt)
             st.session_state['draf_isi'] = response.text.strip()
-            st.success("Draf Selesai!")
         except Exception as e:
-            st.error(f"Gagal generate: {e}")
+            st.error(f"Error AI: {e}")
 
 if 'draf_isi' in st.session_state:
-    st.subheader("📝 Edit & Cetak")
-    isi_final = st.text_area("Review draf sekretaris:", value=st.session_state['draf_isi'], height=300)
-    st.session_state['draf_isi'] = isi_final
-
-    if st.button("💾 Siapkan File Word"):
+    st.subheader("📝 Review Draf")
+    isi_final = st.text_area("Edit manual jika perlu:", value=st.session_state['draf_isi'], height=300)
+    
+    if st.button("💾 Download Hasil (.docx)"):
         try:
+            # MEMANGGIL FILE TEMPLATE KAMU
             doc = Document("template_psh.docx")
-            tgl_now = f"Tegal, {datetime.datetime.now().day} Februari 2026"
             
-            mapping = {"{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth, "{{tanggal}}": tgl_now}
+            # Isi Header otomatis
+            mapping = {"{{nomor}}": nomor, "{{hal}}": hal, "{{yth}}": yth, 
+                       "{{tanggal}}": f"Tegal, {datetime.datetime.now().day} Februari 2026"}
             
             for old, new in mapping.items():
                 for p in doc.paragraphs:
@@ -114,17 +108,13 @@ if 'draf_isi' in st.session_state:
                         for run in p.runs:
                             if old in run.text:
                                 run.text = run.text.replace(old, str(new))
-                                run.font.name = 'Times New Roman'
 
-            format_surat_sekretaris(doc, "{{isi}}", st.session_state['draf_isi'])
+            # Memasukkan draf AI ke posisi {{isi}} di template Word
+            isi_ke_template(doc, "{{isi}}", isi_final)
             
+            # Export ke memori
             out = io.BytesIO()
             doc.save(out)
-            st.session_state['download_file'] = out.getvalue()
-            st.success("Surat siap didownload!")
+            st.download_button("📥 Klik untuk Download", data=out.getvalue(), file_name="Surat_PSH_Jadi.docx")
         except Exception as e:
-            st.error(f"Error Word: {e}")
-
-    if 'download_file' in st.session_state:
-        st.download_button("📥 Download Surat", data=st.session_state['download_file'], 
-                           file_name=f"Surat_PSH_{nomor.replace('/','_')}.docx")
+            st.error(f"Gagal: Pastikan file 'template_psh.docx' sudah kamu upload ke GitHub! Error: {e}")
